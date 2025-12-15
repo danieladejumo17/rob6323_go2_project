@@ -34,7 +34,7 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     # - spaces definition
     action_scale = 0.25
     action_space = 12
-    observation_space = 48
+    observation_space = 48 + 4  # <--- Added 4 for clock inputs
     state_space = 0
     debug_vis = True
 
@@ -102,3 +102,7 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     yaw_rate_reward_scale = 0.5
     action_rate_reward_scale = -0.1 # <--- Added
     base_height_min = 0.20  # Terminate if base is lower than 20cm  <--- Added
+
+    raibert_heuristic_reward_scale = -10.0 # <--- Added
+    feet_clearance_reward_scale = -30.0 # <--- Added
+    tracking_contacts_shaped_force_reward_scale = 4.0 # <--- Added
