@@ -19,13 +19,6 @@ from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, FRAME_MARKER_CFG, G
 
 from isaaclab.actuators import ImplicitActuatorCfg # <--- Added
 
-# </--- Added
-# PD control gains
-Kp = 20.0  # Proportional gain
-Kd = 0.5   # Derivative gain
-torque_limits = 100.0  # Max torque
-# --- Added />
-
 @configclass
 class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     # env
@@ -111,3 +104,10 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     lin_vel_z_reward_scale = -0.02  # <--- Added Vertical Velocity
     dof_vel_reward_scale = -0.0001  # <--- Added Joint Velocity
     ang_vel_xy_reward_scale = -0.001    # <--- Added Roll/Pitch Angular Velocity
+
+    # </--- Added
+    # PD control gains
+    Kp = 20.0  # Proportional gain
+    Kd = 0.5   # Derivative gain
+    torque_limits = 100.0  # Max torque
+    # --- Added />
