@@ -9,6 +9,7 @@ from __future__ import annotations
 import gymnasium as gym
 import math
 import torch
+import numpy as np
 from collections.abc import Sequence
 
 import isaaclab.sim as sim_utils
@@ -44,8 +45,12 @@ class Rob6323Go2Env(DirectRLEnv):
             for key in [
                 "track_lin_vel_xy_exp",
                 "track_ang_vel_z_exp",
-                "rew_action_rate",     # <--- Added
-                "raibert_heuristic"    # <--- Added
+                "rew_action_rate",      # <--- Added
+                "raibert_heuristic",    # <--- Added
+                "orient",               # <--- Added
+                "lin_vel_z",            # <--- Added
+                "dof_vel",              # <--- Added
+                "ang_vel_xy",           # <--- Added
             ]
         }
 
@@ -179,11 +184,34 @@ class Rob6323Go2Env(DirectRLEnv):
         rew_raibert_heuristic = self._reward_raibert_heuristic()
         # --- Added />
 
+        # </--- Added
+        # 1. Penalize non-vertical orientation (projected gravity on XY plane)
+        # Hint: We want the robot to stay upright, so gravity should only project onto Z.
+        # Calculate the sum of squares of the X and Y components of projected_gravity_b.
+        rew_orient = torch.sum(torch.square(self.robot.data.projected_gravity_b[:, :2]), dim=1)
+
+        # 2. Penalize vertical velocity (z-component of base linear velocity)
+        # Hint: Square the Z component of the base linear velocity.
+        rew_lin_vel_z = torch.square(self.robot.data.root_lin_vel_b[:, 2])
+
+        # 3. Penalize high joint velocities
+        # Hint: Sum the squares of all joint velocities.
+        rew_dof_vel = torch.sum(torch.square(self.robot.data.joint_vel), dim=1)
+
+        # 4. Penalize angular velocity in XY plane (roll/pitch)
+        # Hint: Sum the squares of the X and Y components of the base angular velocity.
+        rew_ang_vel_xy = torch.sum(torch.square(self.robot.data.root_ang_vel_b[:, :2]), dim=1)
+        # --- Added />
+
         rewards = {
             "track_lin_vel_xy_exp": lin_vel_error_mapped * self.cfg.lin_vel_reward_scale, # * self.step_dt,     <--- Removed step_dt
             "track_ang_vel_z_exp": yaw_rate_error_mapped * self.cfg.yaw_rate_reward_scale, # * self.step_dt,    <--- Removed step_dt
-            "rew_action_rate": rew_action_rate * self.cfg.action_rate_reward_scale,    # <--- Added
-            "raibert_heuristic": rew_raibert_heuristic * self.cfg.raibert_heuristic_reward_scale,    # <--- Added
+            "rew_action_rate": rew_action_rate * self.cfg.action_rate_reward_scale,                 # <--- Added
+            "raibert_heuristic": rew_raibert_heuristic * self.cfg.raibert_heuristic_reward_scale,   # <--- Added
+            "orient": rew_orient * self.cfg.orient_reward_scale,                                    # <--- Added
+            "lin_vel_z": rew_lin_vel_z * self.cfg.lin_vel_z_reward_scale,                           # <--- Added
+            "dof_vel": rew_dof_vel * self.cfg.dof_vel_reward_scale,                                 # <--- Added
+            "ang_vel_xy": rew_ang_vel_xy * self.cfg.ang_vel_xy_reward_scale,                        # <--- Added
         }
         reward = torch.sum(torch.stack(list(rewards.values())), dim=0)
         # Logging
