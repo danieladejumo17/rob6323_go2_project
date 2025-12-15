@@ -101,3 +101,4 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     lin_vel_reward_scale = 1.0
     yaw_rate_reward_scale = 0.5
     action_rate_reward_scale = -0.1 # <--- Added
+    base_height_min = 0.20  # Terminate if base is lower than 20cm  <--- Added
