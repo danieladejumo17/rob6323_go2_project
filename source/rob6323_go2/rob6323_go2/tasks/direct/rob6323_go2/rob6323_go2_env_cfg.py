@@ -90,20 +90,22 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     goal_vel_visualizer_cfg.markers["arrow"].scale = (0.5, 0.5, 0.5)
     current_vel_visualizer_cfg.markers["arrow"].scale = (0.5, 0.5, 0.5)
 
+    # Early stopping
+    base_height_min = 0.20                              # <--- Added Terminate if base is lower than 20cm  
+
     # reward scales
     lin_vel_reward_scale = 1.0
     yaw_rate_reward_scale = 0.5
-    action_rate_reward_scale = -0.1 # <--- Added
-    base_height_min = 0.20  # Terminate if base is lower than 20cm  <--- Added
+    action_rate_reward_scale = -0.1                     # <--- Added
 
-    raibert_heuristic_reward_scale = -10.0 # <--- Added
-    feet_clearance_reward_scale = -30.0 # <--- Added
-    tracking_contacts_shaped_force_reward_scale = 4.0 # <--- Added
+    raibert_heuristic_reward_scale = -10.0              # <--- Added
+    feet_clearance_reward_scale = -30.0                 # <--- Added
+    tracking_contacts_shaped_force_reward_scale = 4.0   # <--- Added
 
-    orient_reward_scale = -5.0      # <--- Added Projected Gravity Orientation
-    lin_vel_z_reward_scale = -0.02  # <--- Added Vertical Velocity
-    dof_vel_reward_scale = -0.0001  # <--- Added Joint Velocity
-    ang_vel_xy_reward_scale = -0.001    # <--- Added Roll/Pitch Angular Velocity
+    orient_reward_scale = -5.0                          # <--- Added Projected Gravity Orientation
+    lin_vel_z_reward_scale = -0.02                      # <--- Added Vertical Velocity
+    dof_vel_reward_scale = -0.0001                      # <--- Added Joint Velocity
+    ang_vel_xy_reward_scale = -0.001                    # <--- Added Roll/Pitch Angular Velocity
 
     # </--- Added
     # PD control gains
