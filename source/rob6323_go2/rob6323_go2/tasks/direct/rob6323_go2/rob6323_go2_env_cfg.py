@@ -106,3 +106,8 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     raibert_heuristic_reward_scale = -10.0 # <--- Added
     feet_clearance_reward_scale = -30.0 # <--- Added
     tracking_contacts_shaped_force_reward_scale = 4.0 # <--- Added
+
+    orient_reward_scale = -5.0      # <--- Added Projected Gravity Orientation
+    lin_vel_z_reward_scale = -0.02  # <--- Added Vertical Velocity
+    dof_vel_reward_scale = -0.0001  # <--- Added Joint Velocity
+    ang_vel_xy_reward_scale = -0.001    # <--- Added Roll/Pitch Angular Velocity
