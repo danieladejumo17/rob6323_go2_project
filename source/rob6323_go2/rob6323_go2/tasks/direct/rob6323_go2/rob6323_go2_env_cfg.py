@@ -115,3 +115,4 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     # --- Added />
 
     torque_reward_scale = -0.0001  # zero for DMO
+    foot2contact_reward_scale = 1.0 # 0 for DMO
