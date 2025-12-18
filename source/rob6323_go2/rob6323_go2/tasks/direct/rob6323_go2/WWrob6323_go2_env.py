@@ -54,7 +54,6 @@ class Rob6323Go2Env(DirectRLEnv):
                 "rew_foot_clearance",   # <--- Added
                 "rew_tracking_contacts_shaped_force",  # <--- Added
                 "rew_torque",
-                "rew_foot2contact",
             ]
         }
 
@@ -241,18 +240,6 @@ class Rob6323Go2Env(DirectRLEnv):
         # Torque regularization
         rew_torque = torch.sum(torch.square(self.torques), dim=1) # TODO: Watch the scale of this term
 
-        # Feet air time reward  --- scale is 0, ignored
-
-        # Penalty for having more or less than 2 feet in contact
-        rew_foot2contact = -torch.abs((self._contact_sensor.data.net_forces_w[:, self._feet_ids_sensor, 2] > 1.0).sum(dim=1) - 2) / 2.0
-        # Min foot2contact should be -1 - print for debugging
-        print(f"Max abs value of rew_foot2contact: {torch.max(torch.abs(rew_foot2contact)).item()}")
-        
-
-        # rew_stand_still ---- scale is 0, ignored
-
-        # TODO Why clip reward sum in DMO
-
         rewards = {
             "track_lin_vel_xy_exp": lin_vel_error_mapped * self.cfg.lin_vel_reward_scale, # * self.step_dt,     <--- Removed step_dt
             "track_ang_vel_z_exp": yaw_rate_error_mapped * self.cfg.yaw_rate_reward_scale, # * self.step_dt,    <--- Removed step_dt
@@ -265,7 +252,6 @@ class Rob6323Go2Env(DirectRLEnv):
             "rew_foot_clearance": rew_foot_clearance * self.cfg.feet_clearance_reward_scale,        # <--- Added
             "rew_tracking_contacts_shaped_force": rew_tracking_contacts_shaped_force * self.cfg.tracking_contacts_shaped_force_reward_scale,  # <--- Added
             "rew_torque": rew_torque * self.cfg.torque_reward_scale,
-            "rew_foot2contact": rew_foot2contact * self.cfg.foot2contact_reward_scale # max value should be 1
         }
         reward = torch.sum(torch.stack(list(rewards.values())), dim=0)
         # Logging
