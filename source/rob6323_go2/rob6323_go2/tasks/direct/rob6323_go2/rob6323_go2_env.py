@@ -53,6 +53,7 @@ class Rob6323Go2Env(DirectRLEnv):
                 "ang_vel_xy",           # <--- Added
                 "rew_foot_clearance",   # <--- Added
                 "rew_tracking_contacts_shaped_force",  # <--- Added
+                "rew_torque",
             ]
         }
 
@@ -148,6 +149,11 @@ class Rob6323Go2Env(DirectRLEnv):
         self.robot.set_joint_effort_target(torques)
         # --- Added />
 
+        # </--- Added
+        # Store torques for torque regularization reward
+        self.torques = torques
+        # --- Added />
+
     def _get_observations(self) -> dict:
         self._previous_actions = self._actions.clone()
         obs = torch.cat(
@@ -231,6 +237,9 @@ class Rob6323Go2Env(DirectRLEnv):
         rew_tracking_contacts_shaped_force = rew_tracking_contacts_shaped_force / 4 # average over 4 feet
         # --- Added />
 
+        # Torque regularization
+        rew_torque = torch.sum(torch.square(self.torques), dim=1) # TODO: Watch the scale of this term
+
         rewards = {
             "track_lin_vel_xy_exp": lin_vel_error_mapped * self.cfg.lin_vel_reward_scale, # * self.step_dt,     <--- Removed step_dt
             "track_ang_vel_z_exp": yaw_rate_error_mapped * self.cfg.yaw_rate_reward_scale, # * self.step_dt,    <--- Removed step_dt
@@ -242,6 +251,7 @@ class Rob6323Go2Env(DirectRLEnv):
             "ang_vel_xy": rew_ang_vel_xy * self.cfg.ang_vel_xy_reward_scale,                        # <--- Added
             "rew_foot_clearance": rew_foot_clearance * self.cfg.feet_clearance_reward_scale,        # <--- Added
             "rew_tracking_contacts_shaped_force": rew_tracking_contacts_shaped_force * self.cfg.tracking_contacts_shaped_force_reward_scale,  # <--- Added
+            "rew_torque": rew_torque * self.cfg.torque_reward_scale,
         }
         reward = torch.sum(torch.stack(list(rewards.values())), dim=0)
         # Logging

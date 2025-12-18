@@ -111,5 +111,7 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     # PD control gains
     Kp = 20.0  # Proportional gain
     Kd = 0.5   # Derivative gain
-    torque_limits = 100.0  # Max torque
+    torque_limits = 100.0  # Max torque 35 for DMO
     # --- Added />
+
+    torque_reward_scale = -0.0001  # zero for DMO
