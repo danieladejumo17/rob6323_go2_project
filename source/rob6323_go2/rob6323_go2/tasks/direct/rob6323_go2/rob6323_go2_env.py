@@ -17,7 +17,7 @@ from isaaclab.assets import Articulation
 from isaaclab.envs import DirectRLEnv
 from isaaclab.sim.spawners.from_files import GroundPlaneCfg, spawn_ground_plane
 from isaaclab.utils.math import sample_uniform
-from isaaclab.sensors import ContactSensor
+from isaaclab.sensors import ContactSensor, RayCaster
 from isaaclab.markers import VisualizationMarkers
 import isaaclab.utils.math as math_utils
 
@@ -54,7 +54,6 @@ class Rob6323Go2Env(DirectRLEnv):
                 "rew_foot_clearance",   # <--- Added
                 "rew_tracking_contacts_shaped_force",  # <--- Added
                 "rew_torque",
-                "rew_foot2contact",
             ]
         }
 
@@ -104,6 +103,11 @@ class Rob6323Go2Env(DirectRLEnv):
     def _setup_scene(self):
         self.robot = Articulation(self.cfg.robot_cfg)
         self._contact_sensor = ContactSensor(self.cfg.contact_sensor)
+        self.scene.sensors["contact_sensor"] = self._contact_sensor
+        if self.cfg.rough_terrain:
+            # add a height scanner for perceptive locomotion
+            self._height_scanner = RayCaster(self.cfg.height_scanner)
+            self.scene.sensors["height_scanner"] = self._height_scanner
         # add ground plane
         self.cfg.terrain.num_envs = self.scene.cfg.num_envs
         self.cfg.terrain.env_spacing = self.scene.cfg.env_spacing
@@ -157,6 +161,12 @@ class Rob6323Go2Env(DirectRLEnv):
 
     def _get_observations(self) -> dict:
         self._previous_actions = self._actions.clone()
+        height_data = None
+        if self.cfg.rough_terrain:
+            height_data = (
+                self._height_scanner.data.pos_w[:, 2].unsqueeze(1) - self._height_scanner.data.ray_hits_w[..., 2] - 0.5
+            ).clip(-1.0, 1.0)
+
         obs = torch.cat(
             [
                 tensor
@@ -167,6 +177,7 @@ class Rob6323Go2Env(DirectRLEnv):
                     self._commands,
                     self.robot.data.joint_pos - self.robot.data.default_joint_pos,
                     self.robot.data.joint_vel,
+                    height_data,
                     self._actions,
                     self.clock_inputs,  # <--- Added gait phase info
                 )
@@ -244,9 +255,9 @@ class Rob6323Go2Env(DirectRLEnv):
         # Feet air time reward  --- scale is 0, ignored
 
         # Penalty for having more or less than 2 feet in contact
-        rew_foot2contact = -torch.abs((self._contact_sensor.data.net_forces_w[:, self._feet_ids_sensor, 2] > 1.0).sum(dim=1) - 2) / 2.0
+        # rew_foot2contact = -torch.abs((self._contact_sensor.data.net_forces_w[:, self._feet_ids_sensor, 2] > 1.0).sum(dim=1) - 2) / 2.0
         # Min foot2contact should be -1 - print for debugging
-        print(f"Max abs value of rew_foot2contact: {torch.max(torch.abs(rew_foot2contact)).item()}")
+        # print(f"Max abs value of rew_foot2contact: {torch.max(torch.abs(rew_foot2contact)).item()}")
         
 
         # rew_stand_still ---- scale is 0, ignored
@@ -265,7 +276,6 @@ class Rob6323Go2Env(DirectRLEnv):
             "rew_foot_clearance": rew_foot_clearance * self.cfg.feet_clearance_reward_scale,        # <--- Added
             "rew_tracking_contacts_shaped_force": rew_tracking_contacts_shaped_force * self.cfg.tracking_contacts_shaped_force_reward_scale,  # <--- Added
             "rew_torque": rew_torque * self.cfg.torque_reward_scale,
-            "rew_foot2contact": rew_foot2contact * self.cfg.foot2contact_reward_scale # max value should be 1
         }
         reward = torch.sum(torch.stack(list(rewards.values())), dim=0)
         # Logging
@@ -280,9 +290,11 @@ class Rob6323Go2Env(DirectRLEnv):
         cstr_upsidedown = self.robot.data.projected_gravity_b[:, 2] > 0
 
         # </ --- Added
+        cstr_base_height_min = False
         # terminate if base is too low
-        base_height = self.robot.data.root_pos_w[:, 2]
-        cstr_base_height_min = base_height < self.cfg.base_height_min
+        if self.cfg.rough_terrain:
+            base_height = self.robot.data.root_pos_w[:, 2]
+            cstr_base_height_min = base_height < self.cfg.base_height_min
         # --- Added />
 
         died = cstr_termination_contacts | cstr_upsidedown | cstr_base_height_min   # <--- Added cstr_base_height_min

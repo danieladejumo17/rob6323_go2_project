@@ -13,21 +13,25 @@ from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sim import SimulationCfg
 from isaaclab.utils import configclass
 from isaaclab.terrains import TerrainImporterCfg
-from isaaclab.sensors import ContactSensorCfg
+from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns
 from isaaclab.markers import VisualizationMarkersCfg
 from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, FRAME_MARKER_CFG, GREEN_ARROW_X_MARKER_CFG
 
 from isaaclab.actuators import ImplicitActuatorCfg # <--- Added
 
+from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG
+
 @configclass
 class Rob6323Go2EnvCfg(DirectRLEnvCfg):
+    rough_terrain = False
+
     # env
     decimation = 4
     episode_length_s = 20.0
     # - spaces definition
     action_scale = 0.25
     action_space = 12
-    observation_space = 48 + 4  # <--- Added 4 for clock inputs
+    observation_space = int(48 + 4) if not rough_terrain else int(235 + 4)   # <--- Added 4 for clock inputs
     state_space = 0
     debug_vis = True
 
@@ -43,6 +47,7 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
             restitution=0.0,
         ),
     )
+    
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",
         terrain_type="plane",
@@ -53,6 +58,24 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
             static_friction=1.0,
             dynamic_friction=1.0,
             restitution=0.0,
+        ),
+        debug_vis=False,
+    ) if not rough_terrain else TerrainImporterCfg(
+        prim_path="/World/ground",
+        terrain_type="generator",       # <--- Added generator terrain type
+        terrain_generator=ROUGH_TERRAINS_CFG, # <--- Added
+        max_init_terrain_level=9,
+        collision_group=-1,
+        physics_material=sim_utils.RigidBodyMaterialCfg(
+            friction_combine_mode="multiply",
+            restitution_combine_mode="multiply",
+            static_friction=1.0,
+            dynamic_friction=1.0,
+            # restitution=0.0,
+        ),
+        visual_material=sim_utils.MdlFileCfg(
+            mdl_path="{NVIDIA_NUCLEUS_DIR}/Materials/Base/Architecture/Shingles_01.mdl",
+            project_uvw=True,
         ),
         debug_vis=False,
     )
@@ -102,7 +125,8 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     feet_clearance_reward_scale = -30.0                 # <--- Added
     tracking_contacts_shaped_force_reward_scale = 4.0   # <--- Added
 
-    orient_reward_scale = -5.0                          # <--- Added Projected Gravity Orientation
+    # TODO Updated for rough terrain
+    orient_reward_scale = -5.0 if not rough_terrain else 0.0                          # <--- Added Projected Gravity Orientation
     lin_vel_z_reward_scale = -0.02                      # <--- Added Vertical Velocity
     dof_vel_reward_scale = -0.0001                      # <--- Added Joint Velocity
     ang_vel_xy_reward_scale = -0.001                    # <--- Added Roll/Pitch Angular Velocity
@@ -115,4 +139,14 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     # --- Added />
 
     torque_reward_scale = -0.0001  # zero for DMO
-    foot2contact_reward_scale = 1.0 # 0 for DMO
+    foot2contact_reward_scale = 1.0 # TODO 0 for DMO ---- causing trouble!!!
+
+    # height scanner for perceptive locomotion
+    height_scanner = RayCasterCfg(
+        prim_path="/World/envs/env_.*/Robot/base",
+        offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
+        ray_alignment="yaw",
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.6, 1.0]),
+        debug_vis=False,
+        mesh_prim_paths=["/World/ground"],
+    )
