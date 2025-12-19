@@ -164,4 +164,64 @@ The suggested way to inspect these logs is via the Open OnDemand web interface:
     - [ContactSensorData (`_contact_sensor.data`)](https://isaac-sim.github.io/IsaacLab/main/source/api/lab/isaaclab.sensors.html#isaaclab.sensors.ContactSensorData) — Contains `net_forces_w` (contact forces).
 
 ---
-Students should only edit README.md below this line.
+# Changes for Made Gait Robustness
+## I. Reward Shaping
+To achieve gait robustness, the following princinpled reward terms were added in addition to the velocity tracking terms. All reward terms are `regularized` by reward scales defined in the `rob6323_go2_env_cfg` file.
+
+
+### **Base Stability Rewards:**
+### *1. Base Orientation Penalty??*
+
+### *2. Base Vertical (Z) Velocity Penalty*
+
+### *3. Base Roll and Pitch (Ang. Velocity) Penalty*
+
+roll_pitch_penalty_scale???? orientation or velocity??? I think both
+base_height error Penalty
+undesired_contact_penalty_scale
+*Describe the functions where there terms are implemented and how*
+*Add incline comments in those functions*
+
+
+### **Action Regularization and Smoothness Rewards:**
+### *4. Action Rate Penalty*
+
+### *5. Action Jerk Penalty*
+Action rate (first derivative) penalty was separated from the action jerk penalty (second derivative) and both have different reward scales.
+
+### *1. Torque Regularization*
+
+### *1. Raibert Heuristic Reward*
+
+### *1. Feet Clearance*
+
+### *1. Feet Contact Forces*
+
+### *1. Joint Velocity Penalty?? smoothness*
+
+
+### **Gait Shaping Rewards:**
+### *1. Diagonal Phase Consistency Reward*
+
+### *1. Duty Factor Reward*
+
+### *1. Symmetry Reward*
+
+### *1. Pacing Penalty*
+
+### *1. Hopping Penalty*
+
+
+## II. Early Stopping
+### *Base Height*
+
+### III. Domain Randomization
+### *Motor Friction Randomization*
+
+---
+
+# Backflipping Task
+    - Running the Backflipping Task
+    - Env Configuration
+    - Added Rewards
+Removed Reward Terms
