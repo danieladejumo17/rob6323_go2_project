@@ -222,32 +222,46 @@ This reward encourages the robot to place its feet in locations that stabilize t
 
 Implementation: Implemented in the `_reward_raibert_heuristic` function.
 
-### 1. Feet Clearance
+### 10. Feet Clearance
 To prevent tripping, this term encourages the feet to lift to a specific height during the swing phase. It penalizes swing feet that are moving fast but remain close to the ground.
 
 Implementation: Implemented in the `_reward_feet_clearance` function. It identifies feet in the swing phase and penalizes them if their height is below `foot_clearance_target` as defined in `rob6323_go2_env_cfg`.
 
-### 1. Feet Contact Forces
-Reward contact forces that match desired contact timing.
+### 11. Feet Contact Forces
+This term encourages the robot to generate contact forces that match the desired contact schedule (swing vs. stance). It rewards applying force when in stance and zero force when in swing, ensuring the physical contacts align with the gait timing.
 
-<!-- TODO -->
+Implementation: Implemented in the `_reward_tracking_contacts_shaped_force` function. It computes the absolute error between the normalized contact force magnitude and the desired contact state (0 or 1), rewarding minimizing this error.
 
-### 1. Joint Velocity Penalty?? smoothness
+### 12. Joint Velocity Penalty
 This acts as a damping term for the joints, penalizing high rotational velocities. It helps reduce vibrations and ensures the robot operates within safe mechanical limits.
 
 Implementation: Implemented in the `_get_rewards` function. It penalizes the sum of squared joint velocities.
 
 ### **Gait Shaping Rewards:**
-### 1. Diagonal Phase Consistency Reward
+### 13. Diagonal Phase Consistency Reward
+This enforces a trot gait by rewarding synchronization between diagonal leg pairs (e.g., Front-Left and Rear-Right should move together).
 
-### 1. Duty Factor Reward
+Implementation: Implemented in the `_reward_diagonal_phase_consistency` function. It computes the error between the clock inputs of diagonal pairs.
 
-### 1. Symmetry Reward
+### 14. Duty Factor Reward
+This ensures the feet spend the correct proportion of the gait cycle on the ground (stance phase) versus in the air (swing phase), matching the desired gait parameters.
 
-### 1. Pacing Penalty
+Implementation: Implemented in the `_reward_duty_factor` function. It calculates the mean error between the actual contact timing and the desired duty factor provided by the clock.
 
-### 1. Hopping Penalty
+### 15. Symmetry Reward
+This encourages time-symmetric gait patterns, ensuring that the phase offset between legs matches the desired configuration (e.g., legs shouldn't be out of phase in a way that creates a limp).
 
+Implementation: Implemented in the `_reward_symmetry function`. It penalizes deviations from the expected phase differences between specific leg pairs.
+
+### 16. Pacing Penalty
+To prevent the robot from entering a "pace" gait (where lateral pairs like Front-Left and Rear-Left move together), this term penalizes synchronization of lateral legs.
+
+Implementation: Implemented in the `_penalty_pacing function`. It applies a penalty if the clock inputs of lateral pairs are too similar.
+
+### 17. Hopping Penalty
+To prevent the robot from bounding or pronking (hopping with front or back legs together) when a trot is desired, this term penalizes synchronization of the front pair or the rear pair.
+
+Implementation: Implemented in the `_penalty_hopping function`. It applies a penalty if the clock inputs of the front legs or rear legs are too similar.
 
 ## III. Early Stopping
 ### *Base Height*
