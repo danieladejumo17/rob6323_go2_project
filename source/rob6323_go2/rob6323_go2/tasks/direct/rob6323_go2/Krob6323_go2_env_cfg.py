@@ -107,16 +107,22 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     torque_magnitude_penalty_scale = -1e-4  # -0.0001 or smaller as required
     action_rate_penalty_scale = -2e-3  # First derivative: a_t - a_{t-1}
     action_jerk_penalty_scale = -1e-3  # Second derivative: a_t - 2a_{t-1} + a_{t-2}
-    raibert_heuristic_reward_scale = -0.1  # Reduced significantly to avoid overwhelming other rewards
-    feet_clearance_reward_scale = -30.0
-    tracking_contacts_shaped_force_reward_scale = 4.0
+    raibert_heuristic_reward_scale = -0.1  # Reduced to prioritize tracking over Raibert penalty
     
     # Gait shaping reward scales
     diagonal_phase_consistency_reward_scale = 0.5
     duty_factor_reward_scale = 0.3
-    symmetry_reward_scale = 0.5  # Increased to encourage better symmetry
+    symmetry_reward_scale = 0.5
     pacing_penalty_scale = -1.0
     hopping_penalty_scale = -1.0
+    feet_clearance_reward_scale = -10.0
+    tracking_contacts_shaped_force_reward_scale = 4.0
+
+    # Additional reward scales (Part 5 tutorial)
+    orient_reward_scale = -5.0
+    lin_vel_z_reward_scale = -0.02
+    dof_vel_reward_scale = -0.0001
+    ang_vel_xy_reward_scale = -0.001
     
     # Base stability reward scales (kept small to not interfere with locomotion)
     roll_pitch_penalty_scale = -0.05
@@ -127,3 +133,8 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     # Base stability parameters
     base_height_target = 0.30  # Target base height in meters (0.28-0.35 for Go2)
     base_height_tolerance = 0.05  # Tolerance around target height
+
+    # Foot interaction parameters
+    foot_clearance_target = 0.07  # Desired swing foot height (m)
+    foot_stance_height_target = 0.02  # Desired stance foot clearance (m)
+    tracking_contact_force_norm = 200.0  # Force normalization constant for contact tracking

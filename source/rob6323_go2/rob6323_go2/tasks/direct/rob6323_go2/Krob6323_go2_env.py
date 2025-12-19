@@ -31,9 +31,6 @@ class Rob6323Go2Env(DirectRLEnv):
 
         # Joint position command (deviation from default joint positions)
         self._actions = torch.zeros(self.num_envs, gym.spaces.flatdim(self.single_action_space), device=self.device)
-        self._previous_actions = torch.zeros(
-            self.num_envs, gym.spaces.flatdim(self.single_action_space), device=self.device
-        )
 
         # X/Y linear velocity and yaw angular velocity commands
         self._commands = torch.zeros(self.num_envs, 3, device=self.device)
@@ -53,6 +50,12 @@ class Rob6323Go2Env(DirectRLEnv):
                 "symmetry",
                 "pacing_penalty",
                 "hopping_penalty",
+                "feet_clearance",
+                "tracking_contacts_shaped_force",
+                "orient",
+                "lin_vel_z",
+                "dof_vel",
+                "ang_vel_xy",
                 "roll_pitch_penalty",
                 "base_height_error",
                 "vertical_velocity_penalty",
@@ -75,8 +78,6 @@ class Rob6323Go2Env(DirectRLEnv):
         )
         # Get specific body indices
         self._base_id, _ = self._contact_sensor.find_bodies("base")
-        # self._feet_ids, _ = self._contact_sensor.find_bodies(".*foot")
-        # self._undesired_contact_body_ids, _ = self._contact_sensor.find_bodies(".*thigh")
         
         # Variables needed for the raibert heuristic
         # Get specific body indices for feet (after robot is fully initialized in scene)
@@ -102,8 +103,8 @@ class Rob6323Go2Env(DirectRLEnv):
         
         self.gait_indices = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
         self.clock_inputs = torch.zeros(self.num_envs, 4, dtype=torch.float, device=self.device, requires_grad=False)
-        self.desired_contact_states = torch.zeros(self.num_envs, 4, dtype=torch.float, device=self.device, requires_grad=False)
         self.foot_indices = torch.zeros(self.num_envs, 4, dtype=torch.float, device=self.device, requires_grad=False)
+        self.desired_contact_states = torch.zeros(self.num_envs, 4, dtype=torch.float, device=self.device, requires_grad=False)
         
         # Gait shaping state variables
         # Track contact time for duty factor calculation (rolling window)
@@ -114,8 +115,16 @@ class Rob6323Go2Env(DirectRLEnv):
         # PD control parameters
         self.Kp = torch.tensor([cfg.Kp] * 12, device=self.device).unsqueeze(0).repeat(self.num_envs, 1)
         self.Kd = torch.tensor([cfg.Kd] * 12, device=self.device).unsqueeze(0).repeat(self.num_envs, 1)
-        self.motor_offsets = torch.zeros(self.num_envs, 12, device=self.device)
         self.torque_limits = cfg.torque_limits
+
+        # Actuator friction model parameters (per-episode randomization)
+        # Shape: (num_envs, num_joints)
+        # μ_v: viscous friction coefficient ~ Uniform(0.0, 0.3)
+        # F_s: stiction coefficient ~ Uniform(0.0, 2.5)
+        self.mu_v = torch.zeros(self.num_envs, self.robot.num_joints, dtype=torch.float, device=self.device, requires_grad=False)
+        self.F_s = torch.zeros(self.num_envs, self.robot.num_joints, dtype=torch.float, device=self.device, requires_grad=False)
+        # Initialize with random values for all environments
+        self._randomize_friction_params(self.robot._ALL_INDICES)
 
         # add handle for debug visualization (this is set to a valid handle inside set_debug_vis)
         self.set_debug_vis(self.cfg.debug_vis)
@@ -148,17 +157,22 @@ class Rob6323Go2Env(DirectRLEnv):
 
     def _apply_action(self) -> None:
         # Compute PD torques
-        torques = torch.clip(
-            (
-                self.Kp * (
-                    self.desired_joint_pos 
-                    - self.robot.data.joint_pos 
-                )
-                - self.Kd * self.robot.data.joint_vel
-            ),
-            -self.torque_limits,
-            self.torque_limits,
+        torques = (
+            self.Kp * (
+                self.desired_joint_pos 
+                - self.robot.data.joint_pos 
+            )
+            - self.Kd * self.robot.data.joint_vel
         )
+
+        # Compute friction torques and subtract from PD torques
+        joint_vel = self.robot.data.joint_vel
+        tau_stiction = self.F_s * torch.tanh(joint_vel / 0.1)
+        tau_viscous = self.mu_v * joint_vel
+        torques = torques - (tau_stiction + tau_viscous)
+
+        # Clip torques to limits
+        torques = torch.clip(torques, -self.torque_limits, self.torque_limits)
 
         # Store torques for regularization penalty
         self.applied_torques = torques.clone()
@@ -174,7 +188,6 @@ class Rob6323Go2Env(DirectRLEnv):
         return self.robot.data.body_pos_w[:, self._feet_ids]
 
     def _get_observations(self) -> dict:
-        self._previous_actions = self._actions.clone()
         obs = torch.cat(
             [
                 tensor
@@ -221,6 +234,16 @@ class Rob6323Go2Env(DirectRLEnv):
         penalty_torque_magnitude = self._penalty_torque_magnitude()
         penalty_action_rate = self._penalty_action_rate()
         penalty_action_jerk = self._penalty_action_jerk()
+
+        # Orientation and velocity penalties (Part 5 tutorial)
+        # Uprightness: projected gravity should have minimal XY components
+        rew_orient = torch.sum(torch.square(self.robot.data.projected_gravity_b[:, :2]), dim=1)
+        # Vertical linear velocity in body frame
+        rew_lin_vel_z = torch.square(self.robot.data.root_lin_vel_b[:, 2])
+        # Joint velocity magnitude
+        rew_dof_vel = torch.sum(torch.square(self.robot.data.joint_vel), dim=1)
+        # Roll/pitch angular velocity in body frame
+        rew_ang_vel_xy = torch.sum(torch.square(self.robot.data.root_ang_vel_b[:, :2]), dim=1)
         
         # Update the prev action hist (roll buffer and insert new action)
         # IMPORTANT: Do this AFTER computing action_rate and action_jerk penalties
@@ -236,6 +259,8 @@ class Rob6323Go2Env(DirectRLEnv):
         rew_symmetry = self._reward_symmetry()
         penalty_pacing = self._penalty_pacing()
         penalty_hopping = self._penalty_hopping()
+        rew_feet_clearance = self._reward_feet_clearance()
+        rew_tracking_contacts = self._reward_tracking_contacts_shaped_force()
         
         # Base stability rewards
         penalty_roll_pitch = self._penalty_roll_pitch()
@@ -256,6 +281,12 @@ class Rob6323Go2Env(DirectRLEnv):
             "symmetry": rew_symmetry * self.cfg.symmetry_reward_scale,
             "pacing_penalty": penalty_pacing * self.cfg.pacing_penalty_scale,
             "hopping_penalty": penalty_hopping * self.cfg.hopping_penalty_scale,
+            "feet_clearance": rew_feet_clearance * self.cfg.feet_clearance_reward_scale,
+            "tracking_contacts_shaped_force": rew_tracking_contacts * self.cfg.tracking_contacts_shaped_force_reward_scale,
+            "orient": rew_orient * self.cfg.orient_reward_scale,
+            "lin_vel_z": rew_lin_vel_z * self.cfg.lin_vel_z_reward_scale,
+            "dof_vel": rew_dof_vel * self.cfg.dof_vel_reward_scale,
+            "ang_vel_xy": rew_ang_vel_xy * self.cfg.ang_vel_xy_reward_scale,
             # Base stability rewards
             "roll_pitch_penalty": penalty_roll_pitch * self.cfg.roll_pitch_penalty_scale,
             "base_height_error": penalty_base_height * self.cfg.base_height_error_penalty_scale,
@@ -414,6 +445,40 @@ class Rob6323Go2Env(DirectRLEnv):
             0.2 * fr_symmetry   # Front-rear aggregate symmetry
         )
         
+        return reward
+
+    def _reward_feet_clearance(self) -> torch.Tensor:
+        """Penalize insufficient swing foot lift and excessive stance clearance."""
+        foot_heights = self.foot_positions_w[:, :, 2]
+        # foot_indices in [0, 1]; values >= 0.5 correspond to swing phase
+        swing_mask = (self.foot_indices >= 0.5).float()
+        stance_mask = 1.0 - swing_mask
+
+        swing_deficit = torch.clamp(self.cfg.foot_clearance_target - foot_heights, min=0.0)
+        stance_excess = torch.clamp(foot_heights - self.cfg.foot_stance_height_target, min=0.0)
+
+        swing_penalty = swing_mask * torch.square(swing_deficit)
+        stance_penalty = stance_mask * torch.square(stance_excess)
+
+        penalty = torch.sum(swing_penalty + stance_penalty, dim=1)
+        return penalty
+
+    def _reward_tracking_contacts_shaped_force(self) -> torch.Tensor:
+        """Reward contact forces that match desired contact timing."""
+        if len(self._feet_ids_sensor) == 0:
+            return torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
+
+        contact_forces = self._contact_sensor.data.net_forces_w_history[:, 0, self._feet_ids_sensor, :]
+        force_magnitude = torch.norm(contact_forces, dim=-1)
+
+        normalized_force = torch.clamp(
+            force_magnitude / self.cfg.tracking_contact_force_norm, min=0.0, max=1.0
+        )
+        desired_contacts = torch.clamp(self.desired_contact_states, 0.0, 1.0)
+        tracking_error = torch.abs(normalized_force - desired_contacts)
+        per_foot_reward = 1.0 - torch.clamp(tracking_error, 0.0, 1.0)
+
+        reward = torch.mean(per_foot_reward, dim=1)
         return reward
 
     def _penalty_pacing(self) -> torch.Tensor:
@@ -723,6 +788,7 @@ class Rob6323Go2Env(DirectRLEnv):
         self.desired_contact_states[:, 2] = smoothing_multiplier_RL
         self.desired_contact_states[:, 3] = smoothing_multiplier_RR
 
+
     def _reward_raibert_heuristic(self):
         """Compute Raibert heuristic reward based on foot placement error."""
         cur_footsteps_translated = self.foot_positions_w - self.robot.data.root_pos_w.unsqueeze(1)
@@ -769,6 +835,20 @@ class Rob6323Go2Env(DirectRLEnv):
 
         return reward
 
+    def _randomize_friction_params(self, env_ids: Sequence[int] | torch.Tensor) -> None:
+        """Randomize friction parameters for specified environments."""
+        if not isinstance(env_ids, torch.Tensor):
+            env_ids = torch.tensor(env_ids, dtype=torch.long, device=self.device)
+
+        num_resets = len(env_ids)
+        num_joints = self.robot.num_joints
+
+        mu_v_samples = sample_uniform(0.0, 0.3, (num_resets,), device=self.device)
+        F_s_samples = sample_uniform(0.0, 2.5, (num_resets,), device=self.device)
+
+        self.mu_v[env_ids] = mu_v_samples.unsqueeze(1).repeat(1, num_joints)
+        self.F_s[env_ids] = F_s_samples.unsqueeze(1).repeat(1, num_joints)
+
     def _reset_idx(self, env_ids: Sequence[int] | None):
         if env_ids is None or len(env_ids) == self.num_envs:
             env_ids = self.robot._ALL_INDICES
@@ -778,7 +858,6 @@ class Rob6323Go2Env(DirectRLEnv):
             # Spread out the resets to avoid spikes in training when many environments reset at a similar time
             self.episode_length_buf[:] = torch.randint_like(self.episode_length_buf, high=int(self.max_episode_length))
         self._actions[env_ids] = 0.0
-        self._previous_actions[env_ids] = 0.0
         # Reset last actions hist
         self.last_actions[env_ids] = 0.0
         # Reset applied torques
@@ -788,8 +867,11 @@ class Rob6323Go2Env(DirectRLEnv):
         # Reset gait shaping state
         self.contact_time[env_ids] = 0.0
         self.total_time[env_ids] = 0.0
+        self.desired_contact_states[env_ids] = 0.0
         # Reset command time tracking
         self.command_time[env_ids] = 0.0
+        # Randomize friction parameters for reset environments
+        self._randomize_friction_params(env_ids)
         # Sample new commands on reset
         self._sample_commands(env_ids)
         # Reset robot state

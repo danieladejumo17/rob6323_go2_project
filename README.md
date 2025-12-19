@@ -164,34 +164,59 @@ The suggested way to inspect these logs is via the Open OnDemand web interface:
     - [ContactSensorData (`_contact_sensor.data`)](https://isaac-sim.github.io/IsaacLab/main/source/api/lab/isaaclab.sensors.html#isaaclab.sensors.ContactSensorData) — Contains `net_forces_w` (contact forces).
 
 ---
-# Changes for Made Gait Robustness
+# Changes Made for Gait Robustness
 ## I. Reward Shaping
-To achieve gait robustness, the following princinpled reward terms were added in addition to the velocity tracking terms. All reward terms are `regularized` by reward scales defined in the `rob6323_go2_env_cfg` file.
+To achieve gait robustness, the following princinpled reward terms were added in addition to the velocity tracking terms. All reward terms are implemented in `rob6323_go2_env.py` and are scaled by reward scales defined in the `rob6323_go2_env_cfg.py`.
 
 
 ### **Base Stability Rewards:**
-### *1. Base Orientation Penalty??*
+### *1. Base Orientation Penalty*
+<!-- Describe this penalty and why it was added -->
+<!-- Reference the function where this term is implemented and how -->
+To prevent the robot from tipping over or walking with a tilt, this penalty minimizes the projection of gravity onto the robot's horizontal plane. It encourages the robot's vertical axis to align with the global gravity vector.
 
-### *2. Base Vertical (Z) Velocity Penalty*
+This reward is implemented in the `_penalty_roll_pitch` function. It calculates the sum of squares of the projected gravity vector's x and y components. We penalize only significant deviations to allow for small angles for locomotion.
 
-### *3. Base Roll and Pitch (Ang. Velocity) Penalty*
+### *2. Base Roll and Pitch (Angular Velocity) Penalty*
+To reduce wobbling and ensure a stable upper body, this term penalizes high angular velocities in the roll and pitch axes. This dampens oscillations in the robot's base.
 
-roll_pitch_penalty_scale???? orientation or velocity??? I think both
-base_height error Penalty
-undesired_contact_penalty_scale
-*Describe the functions where there terms are implemented and how*
-*Add incline comments in those functions*
+It is mplemented in the `_penalty_roll_pitch` function. We also penalize only significant angular X and Y velocities of the robot's base.
 
+### *3. Base Vertical (Z) Velocity Penalty*
+To prevent the robot from hopping unnecessarily or jittering vertically while walking on flat ground, this penalty discourages vertical movement of the base.
+
+Implemented in the `_penalty_vertical_velocity` function. It penalizes the square of the base's linear velocity in the z-direction.
+
+### *4. Base Height Error Penalty*
+This term ensures the robot maintains a specific, optimal standing height defined in the configuration. It prevents the robot from crawling too low or standing too high on tiptoes.
+
+Implemented in the `_penalty_base_height_error` function. It calculates the squared difference between the current root height and the target_height.
+
+### *5. Undesired Contact Penalty*
+To prevent the robot from falling or bumping its knees, this term penalizes collisions on any part of the robot body except the feet (e.g., thighs, calves, or base).
+
+Implemented in the `_penalty_undesired_contacts` function. It checks the net external contact forces on all bodies not listed in feet_indices and applies a penalty if forces are detected.
 
 ### **Action Regularization and Smoothness Rewards:**
-### *4. Action Rate Penalty*
+### *6. Torque Regularization*
+To encourage energy efficiency and prevent motor overheating, this term penalizes high torque output from the actuators.
 
-### *5. Action Jerk Penalty*
-Action rate (first derivative) penalty was separated from the action jerk penalty (second derivative) and both have different reward scales.
+Implementation: Implemented in the `_penalty_torque_magnitude` function. It computes the mean of squared torques applied to all joints, which is then normalized by torque-limits-squared to make it scale-invariant.
 
-### *1. Torque Regularization*
+### *7. Action Rate Penalty*
+This penalizes the rate of change in actions (the difference between the current action and the previous action). It encourages smooth control signals and prevents high-frequency oscillation in the actuators.
 
-### *1. Raibert Heuristic Reward*
+Implemented in the `_penalty_action_rate` function. It computes the mean of the squared difference `self._actions - self._previous_actions`.
+
+### *8. Action Jerk Penalty*
+The action jerk penalty (second derivative) was separated from action rate (first derivative) penalty so that each can have different reward scales. This penalizes the acceleration of the action signal, further smoothing the motion.
+
+Implementation: Implemented in the `_penalty_action_jerk` function. It uses a finite difference approximation of the second derivative: `self._actions - 2*self._previous_actions + self._pre_previous_actions`.
+
+### *9. Raibert Heuristic Reward*
+This reward encourages the robot to place its feet in locations that stabilize the base velocity, following the Raibert heuristic (foot placement based on velocity). It guides the policy toward physically realistic locomotion strategies.
+
+Implementation: Implemented in the `_reward_raibert_heuristic` function.
 
 ### *1. Feet Clearance*
 
@@ -224,4 +249,7 @@ Action rate (first derivative) penalty was separated from the action jerk penalt
     - Running the Backflipping Task
     - Env Configuration
     - Added Rewards
-Removed Reward Terms
+    - Removed Reward Terms
+
+
+
