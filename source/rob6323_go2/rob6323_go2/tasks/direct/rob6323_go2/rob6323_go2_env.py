@@ -297,7 +297,10 @@ class Rob6323Go2Env(DirectRLEnv):
             cstr_base_height_min = base_height < self.cfg.base_height_min
         # --- Added />
 
-        died = cstr_termination_contacts | cstr_upsidedown | cstr_base_height_min   # <--- Added cstr_base_height_min
+        if self.cfg.rough_terrain:
+            died = cstr_termination_contacts | cstr_upsidedown | cstr_base_height_min   # <--- Added cstr_base_height_min
+        else:
+            died = cstr_upsidedown
         return died, time_out
 
     def _reset_idx(self, env_ids: Sequence[int] | None):

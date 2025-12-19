@@ -165,83 +165,92 @@ The suggested way to inspect these logs is via the Open OnDemand web interface:
 
 ---
 # Changes Made for Gait Robustness
-## I. Reward Shaping
+### I. Domain Randomization
+### *Motor Friction Randomization*
+Describe what needs to be done to run the training with Actuator friction rand. or not
+
+## II. Reward Shaping
 To achieve gait robustness, the following princinpled reward terms were added in addition to the velocity tracking terms. All reward terms are implemented in `rob6323_go2_env.py` and are scaled by reward scales defined in the `rob6323_go2_env_cfg.py`.
 
 
 ### **Base Stability Rewards:**
-### *1. Base Orientation Penalty*
+### 1. Base Orientation Penalty
 <!-- Describe this penalty and why it was added -->
 <!-- Reference the function where this term is implemented and how -->
 To prevent the robot from tipping over or walking with a tilt, this penalty minimizes the projection of gravity onto the robot's horizontal plane. It encourages the robot's vertical axis to align with the global gravity vector.
 
 This reward is implemented in the `_penalty_roll_pitch` function. It calculates the sum of squares of the projected gravity vector's x and y components. We penalize only significant deviations to allow for small angles for locomotion.
 
-### *2. Base Roll and Pitch (Angular Velocity) Penalty*
+### 2. Base Roll and Pitch (Angular Velocity) Penalty
 To reduce wobbling and ensure a stable upper body, this term penalizes high angular velocities in the roll and pitch axes. This dampens oscillations in the robot's base.
 
 It is mplemented in the `_penalty_roll_pitch` function. We also penalize only significant angular X and Y velocities of the robot's base.
 
-### *3. Base Vertical (Z) Velocity Penalty*
+### 3. Base Vertical (Z) Velocity Penalty
 To prevent the robot from hopping unnecessarily or jittering vertically while walking on flat ground, this penalty discourages vertical movement of the base.
 
 Implemented in the `_penalty_vertical_velocity` function. It penalizes the square of the base's linear velocity in the z-direction.
 
-### *4. Base Height Error Penalty*
+### 4. Base Height Error Penalty
 This term ensures the robot maintains a specific, optimal standing height defined in the configuration. It prevents the robot from crawling too low or standing too high on tiptoes.
 
 Implemented in the `_penalty_base_height_error` function. It calculates the squared difference between the current root height and the target_height.
 
-### *5. Undesired Contact Penalty*
+### 5. Undesired Contact Penalty
 To prevent the robot from falling or bumping its knees, this term penalizes collisions on any part of the robot body except the feet (e.g., thighs, calves, or base).
 
 Implemented in the `_penalty_undesired_contacts` function. It checks the net external contact forces on all bodies not listed in feet_indices and applies a penalty if forces are detected.
 
 ### **Action Regularization and Smoothness Rewards:**
-### *6. Torque Regularization*
+### 6. Torque Regularization
 To encourage energy efficiency and prevent motor overheating, this term penalizes high torque output from the actuators.
 
 Implementation: Implemented in the `_penalty_torque_magnitude` function. It computes the mean of squared torques applied to all joints, which is then normalized by torque-limits-squared to make it scale-invariant.
 
-### *7. Action Rate Penalty*
+### 7. Action Rate Penalty
 This penalizes the rate of change in actions (the difference between the current action and the previous action). It encourages smooth control signals and prevents high-frequency oscillation in the actuators.
 
 Implemented in the `_penalty_action_rate` function. It computes the mean of the squared difference `self._actions - self._previous_actions`.
 
-### *8. Action Jerk Penalty*
+### 8. Action Jerk Penalty
 The action jerk penalty (second derivative) was separated from action rate (first derivative) penalty so that each can have different reward scales. This penalizes the acceleration of the action signal, further smoothing the motion.
 
 Implementation: Implemented in the `_penalty_action_jerk` function. It uses a finite difference approximation of the second derivative: `self._actions - 2*self._previous_actions + self._pre_previous_actions`.
 
-### *9. Raibert Heuristic Reward*
+### 9. Raibert Heuristic Reward
 This reward encourages the robot to place its feet in locations that stabilize the base velocity, following the Raibert heuristic (foot placement based on velocity). It guides the policy toward physically realistic locomotion strategies.
 
 Implementation: Implemented in the `_reward_raibert_heuristic` function.
 
-### *1. Feet Clearance*
+### 1. Feet Clearance
+To prevent tripping, this term encourages the feet to lift to a specific height during the swing phase. It penalizes swing feet that are moving fast but remain close to the ground.
 
-### *1. Feet Contact Forces*
+Implementation: Implemented in the `_reward_feet_clearance` function. It identifies feet in the swing phase and penalizes them if their height is below `foot_clearance_target` as defined in `rob6323_go2_env_cfg`.
 
-### *1. Joint Velocity Penalty?? smoothness*
+### 1. Feet Contact Forces
+Reward contact forces that match desired contact timing.
 
+<!-- TODO -->
+
+### 1. Joint Velocity Penalty?? smoothness
+This acts as a damping term for the joints, penalizing high rotational velocities. It helps reduce vibrations and ensures the robot operates within safe mechanical limits.
+
+Implementation: Implemented in the `_get_rewards` function. It penalizes the sum of squared joint velocities.
 
 ### **Gait Shaping Rewards:**
-### *1. Diagonal Phase Consistency Reward*
+### 1. Diagonal Phase Consistency Reward
 
-### *1. Duty Factor Reward*
+### 1. Duty Factor Reward
 
-### *1. Symmetry Reward*
+### 1. Symmetry Reward
 
-### *1. Pacing Penalty*
+### 1. Pacing Penalty
 
-### *1. Hopping Penalty*
+### 1. Hopping Penalty
 
 
-## II. Early Stopping
+## III. Early Stopping
 ### *Base Height*
-
-### III. Domain Randomization
-### *Motor Friction Randomization*
 
 ---
 
