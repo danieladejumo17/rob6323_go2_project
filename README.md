@@ -166,7 +166,7 @@ The suggested way to inspect these logs is via the Open OnDemand web interface:
 ---
 # Changes Made for Gait Robustness
 ### I. Domain Randomization
-### *Motor Friction Randomization*
+### *Actuator Friction Randomization*
 Describe what needs to be done to run the training with Actuator friction rand. or not
 
 ## II. Reward Shaping

@@ -11,7 +11,7 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, R
 @configclass
 class PPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 32
-    max_iterations = 51  # Changed!!
+    max_iterations = 500
     save_interval = 50
     experiment_name = "go2_flat_direct"
     policy = RslRlPpoActorCriticCfg(
