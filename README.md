@@ -165,9 +165,42 @@ The suggested way to inspect these logs is via the Open OnDemand web interface:
 
 ---
 # Changes Made for Gait Robustness
-### I. Domain Randomization
-### *Actuator Friction Randomization*
-Describe what needs to be done to run the training with Actuator friction rand. or not
+## I. Domain Randomization
+### *Actuator Friction Model with Randomization*
+> To run the environment with Actuator Friction model the files `friction_rob6323_go2_env.py` and `friction_rob6323_go2_env_cfg.py` should be renamed to `rob6323_go2_env.py` and `rob6323_go2_env_cfg.py`. The original `rob6323_go2_env.py` and `rob6323_go2_env_cfg.py` should be given a temporary name.
+
+An actuator friction model was created by subtracting the friction torque, $\tau_{\text{friction}}$, from the output torque from the PD controller, $\tau_{\text{PD}}$.
+
+#### Actuator Friction Model
+
+The friction torque is defined as:
+
+$$
+\tau_{\text{friction}} = \tau_{\text{stiction}} + \tau_{\text{viscous}}
+$$
+
+$$
+\tau_{\text{stiction}} = F_s \cdot \tanh\!\left(\frac{\dot{q}}{0.1}\right)
+$$
+
+$$
+\tau_{\text{viscous}} = \mu_v \cdot \dot{q}
+$$
+
+The PD controller torque is modified as:
+
+$$
+\tau_{PD} \leftarrow \tau_{PD} - \tau_{\text{friction}}
+$$
+
+During environment reset, the randomized parameters are sampled as:
+
+$$
+\mu_v^{\epsilon} \sim \mathcal{U}(0.0, 0.3), \quad
+F_s^{\epsilon} \sim \mathcal{U}(0.0, 2.5)
+$$
+
+where $\dot{q}$ is the joint velocity, $F_s$ is the stiction coefficient, and $\mu_v$ is the viscous coefficient. This forces the policy to overcome internal joint resistance, significantly narrowing the sim-to-real gap.
 
 ## II. Reward Shaping
 To achieve gait robustness, the following princinpled reward terms were added in addition to the velocity tracking terms. All reward terms are implemented in `rob6323_go2_env.py` and are scaled by reward scales defined in the `rob6323_go2_env_cfg.py`.
@@ -264,15 +297,64 @@ To prevent the robot from bounding or pronking (hopping with front or back legs 
 Implementation: Implemented in the `_penalty_hopping function`. It applies a penalty if the clock inputs of the front legs or rear legs are too similar.
 
 ## III. Early Stopping
-### *Base Height*
+To speed up learning, an episode terminates early if specific failure conditions are met.
+
+### 1. Base Height Limits
+
+The episode terminates if the robot's base height falls below a critical threshold (fall) or exceeds a maximum.
+
+Implementation: Implemented in `_get_dones`. Checks `self.robot.data.root_pos_w[:, 2]` to get the base Z position in the world frame.
+
+### 2. Base Orientation (Upside Down)
+
+The episode terminates if the robot flips over. This is detected by checking the projection of the gravity vector onto the robot's body Z-axis. If the component is positive, it implies the robot is upside down.
+
+Implementation: Implemented in `_get_dones`. It checks self.robot.data.projected_gravity_b[:, 2] > 0.
+
+### 3. Undesired Base Contact (Crash)
+
+The episode terminates if the robot's base (torso) makes contact with the ground. This prevents the robot from learning strategies that involve dragging the body.
+
+Implementation: Implemented in `_get_dones`. It uses the contact sensor to check for contacts on the base.
 
 ---
 
-# Backflipping Task
-    - Running the Backflipping Task
-    - Env Configuration
-    - Added Rewards
-    - Removed Reward Terms
+# Controlled Backflip with Recovery (Bonus)
+> To run the environment for the controlled backflip with recovery task, the files `backflip_rob6323_go2_env.py` and `backflip_rob6323_go2_env_cfg.py` should be renamed to `rob6323_go2_env.py` and `rob6323_go2_env_cfg.py`. The original `rob6323_go2_env.py` and `rob6323_go2_env_cfg.py` should be given a temporary name.
+
+For the controlled backflip with recovery task, the following changes were made to the environment configuration and rewards. However, we could not achieve a full backflip with a recovery landing on the four legs yet. The robot manages to make a turn (around the axis  for pitch), but lands on its back.
+
+- Stage-Based State Machine: We introduced a 5-stage scheduler (stand, sit, jump, air, land) managed by base height and contact sensors to orchestrate the backflip maneuver.
+
+- Observation Space Expansion: We expanded observations to include backflip context: _a normalized stage index, stage timer, and integrated turn progress._ 
+
+- Action Scaffolding: We replaced static default joint positions with dynamic, stage-dependent nominal poses (e.g., crouching during sit, tucking legs during jump/air).
+
+- Dynamic Action Scaling: Applied a multiplier (backflip_action_scale_mult) to boost control authority specifically during the high-power jump and air stages.
+
+
+- Removal of Locomotion Rewards: We eliminated gait-specific terms like _duty_factor, raibert_heuristic, phase_consistency, and feet_clearance._
+
+- Stage-Wise Reward Shaping: We implemented distinct reward weights and objectives for each stage (e.g., height reward decrease in sit vs. height reward increase in jump).
+
+
+- Rotation and Balance Objectives
+
+  -  Velocity: We rewarded high-pitch angular velocity during jump and air (previously penalized in walking) while penalizing it during land.
+
+
+  - Turn Progress: We added a specific reward for accumulating pitch rotation.
+
+  - Orientation: We changed orientation targets to allow/encourage rotation during flight while enforcing upright stability during landing.
+
+
+- Inverted Posture Allowance: We modified termination criteria to allow the robot to be upside-down during jump and air stages (previously a crash condition).
+
+### Reference:
+
+> **Stage-Wise Reward Shaping for Acrobatic Robots: A Constrained Multi-Objective Reinforcement Learning Approach**  
+> *arXiv:2409.15755v1, 2024*
+
 
 
 
