@@ -13,27 +13,27 @@ from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.sim import SimulationCfg
 from isaaclab.utils import configclass
 from isaaclab.terrains import TerrainImporterCfg
-from isaaclab.sensors import ContactSensorCfg, RayCasterCfg, patterns
+from isaaclab.sensors import ContactSensorCfg
 from isaaclab.markers import VisualizationMarkersCfg
 from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, FRAME_MARKER_CFG, GREEN_ARROW_X_MARKER_CFG
 
-from isaaclab.actuators import ImplicitActuatorCfg # <--- Added
-
-from isaaclab.terrains.config.rough import ROUGH_TERRAINS_CFG
-
 @configclass
 class Rob6323Go2EnvCfg(DirectRLEnvCfg):
-    rough_terrain = False
-
     # env
     decimation = 4
     episode_length_s = 20.0
     # - spaces definition
     action_scale = 0.25
     action_space = 12
-    observation_space = int(48 + 4) if not rough_terrain else int(235 + 4)   # <--- Added 4 for clock inputs
+    observation_space = 48 + 4  # Added 4 for clock inputs
     state_space = 0
     debug_vis = True
+    
+    # Command following parameters
+    command_resample_time = 3.0  # Resample commands every 3 seconds (2-4s range)
+    lin_vel_x_range = (-1.0, 1.0)  # Forward velocity range (m/s)
+    lin_vel_y_range = (-0.5, 0.5)  # Lateral velocity range (m/s)
+    ang_vel_yaw_range = (-1.0, 1.0)  # Yaw rate range (rad/s)
 
     # simulation
     sim: SimulationCfg = SimulationCfg(
@@ -47,7 +47,6 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
             restitution=0.0,
         ),
     )
-    
     terrain = TerrainImporterCfg(
         prim_path="/World/ground",
         terrain_type="plane",
@@ -60,39 +59,22 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
             restitution=0.0,
         ),
         debug_vis=False,
-    ) if not rough_terrain else TerrainImporterCfg(
-        prim_path="/World/ground",
-        terrain_type="generator",       # <--- Added generator terrain type
-        terrain_generator=ROUGH_TERRAINS_CFG, # <--- Added
-        max_init_terrain_level=9,
-        collision_group=-1,
-        physics_material=sim_utils.RigidBodyMaterialCfg(
-            friction_combine_mode="multiply",
-            restitution_combine_mode="multiply",
-            static_friction=1.0,
-            dynamic_friction=1.0,
-            # restitution=0.0,
-        ),
-        visual_material=sim_utils.MdlFileCfg(
-            mdl_path="{NVIDIA_NUCLEUS_DIR}/Materials/Base/Architecture/Shingles_01.mdl",
-            project_uvw=True,
-        ),
-        debug_vis=False,
     )
+    # PD control gains
+    Kp = 20.0  # Proportional gain
+    Kd = 0.5   # Derivative gain
+    torque_limits = 100.0  # Max torque
+
     # robot(s)
-    # robot_cfg: ArticulationCfg = UNITREE_GO2_CFG.replace(prim_path="/World/envs/env_.*/Robot")
-    # </ --- Added
-    # Update robot_cfg
     robot_cfg: ArticulationCfg = UNITREE_GO2_CFG.replace(prim_path="/World/envs/env_.*/Robot")
-    # "base_legs" is an arbitrary key we use to group these actuators
-    robot_cfg.actuators["base_legs"] = ImplicitActuatorCfg(
-        joint_names_expr=[".*_hip_joint", ".*_thigh_joint", ".*_calf_joint"],
-        effort_limit=23.5,
-        velocity_limit=30.0,
-        stiffness=0.0,  # CRITICAL: Set to 0 to disable implicit P-gain
-        damping=0.0,    # CRITICAL: Set to 0 to disable implicit D-gain
-    )
-    # --- Added />
+    # Disable implicit PD controller by setting stiffness and damping to 0 for all actuators
+    # CRITICAL: Set to 0 to disable implicit P-gain and D-gain
+    # Modify all existing actuators to disable implicit PD control
+    for actuator_name, actuator in robot_cfg.actuators.items():
+        if hasattr(actuator, "stiffness"):
+            actuator.stiffness = 0.0
+        if hasattr(actuator, "damping"):
+            actuator.damping = 0.0
 
     # scene
     scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=4.0, replicate_physics=True)
@@ -113,40 +95,46 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
     goal_vel_visualizer_cfg.markers["arrow"].scale = (0.5, 0.5, 0.5)
     current_vel_visualizer_cfg.markers["arrow"].scale = (0.5, 0.5, 0.5)
 
-    # Early stopping
-    base_height_min = 0.20                              # <--- Added Terminate if base is lower than 20cm  
+    # termination criteria
+    base_height_min = 0.20  # Terminate if base is lower than 20cm
 
     # reward scales
     lin_vel_reward_scale = 1.0
     yaw_rate_reward_scale = 0.5
-    action_rate_reward_scale = -0.1                     # <--- Added
+    action_rate_reward_scale = -0.1  # Legacy: combines first and second derivatives
+    
+    # Action regularization and smoothness reward scales (very small as per requirements)
+    torque_magnitude_penalty_scale = -1e-4  # -0.0001 or smaller as required
+    action_rate_penalty_scale = -2e-3  # First derivative: a_t - a_{t-1}
+    action_jerk_penalty_scale = -1e-3  # Second derivative: a_t - 2a_{t-1} + a_{t-2}
+    raibert_heuristic_reward_scale = -0.1  # Reduced to prioritize tracking over Raibert penalty
+    
+    # Gait shaping reward scales
+    diagonal_phase_consistency_reward_scale = 0.5
+    duty_factor_reward_scale = 0.3
+    symmetry_reward_scale = 0.5
+    pacing_penalty_scale = -1.0
+    hopping_penalty_scale = -1.0
+    feet_clearance_reward_scale = -10.0
+    tracking_contacts_shaped_force_reward_scale = 4.0
 
-    raibert_heuristic_reward_scale = -10.0              # <--- Added
-    feet_clearance_reward_scale = -30.0                 # <--- Added
-    tracking_contacts_shaped_force_reward_scale = 4.0   # <--- Added
+    # Additional reward scales (Part 5 tutorial)
+    orient_reward_scale = -5.0
+    lin_vel_z_reward_scale = -0.02
+    dof_vel_reward_scale = -0.0001
+    ang_vel_xy_reward_scale = -0.001
+    
+    # Base stability reward scales (kept small to not interfere with locomotion)
+    roll_pitch_penalty_scale = -0.05
+    base_height_error_penalty_scale = -0.2
+    vertical_velocity_penalty_scale = -0.01
+    undesired_contact_penalty_scale = -0.5
+    
+    # Base stability parameters
+    base_height_target = 0.30  # Target base height in meters (0.28-0.35 for Go2)
+    base_height_tolerance = 0.05  # Tolerance around target height
 
-    # TODO Updated for rough terrain
-    orient_reward_scale = -5.0 if not rough_terrain else 0.0                          # <--- Added Projected Gravity Orientation
-    lin_vel_z_reward_scale = -0.02                      # <--- Added Vertical Velocity
-    dof_vel_reward_scale = -0.0001                      # <--- Added Joint Velocity
-    ang_vel_xy_reward_scale = -0.001                    # <--- Added Roll/Pitch Angular Velocity
-
-    # </--- Added
-    # PD control gains
-    Kp = 20.0  # Proportional gain
-    Kd = 0.5   # Derivative gain
-    torque_limits = 100.0  # Max torque 35 for DMO
-    # --- Added />
-
-    torque_reward_scale = -0.0001  # zero for DMO
-    foot2contact_reward_scale = 1.0 # TODO 0 for DMO ---- causing trouble!!!
-
-    # height scanner for perceptive locomotion
-    height_scanner = RayCasterCfg(
-        prim_path="/World/envs/env_.*/Robot/base",
-        offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
-        ray_alignment="yaw",
-        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.6, 1.0]),
-        debug_vis=False,
-        mesh_prim_paths=["/World/ground"],
-    )
+    # Foot interaction parameters
+    foot_clearance_target = 0.07  # Desired swing foot height (m)
+    foot_stance_height_target = 0.02  # Desired stance foot clearance (m)
+    tracking_contact_force_norm = 200.0  # Force normalization constant for contact tracking
