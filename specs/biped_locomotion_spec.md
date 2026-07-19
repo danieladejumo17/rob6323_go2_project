@@ -143,3 +143,34 @@ WSL2 notes baked into `scripts/train_local.sh`: bind `/usr/lib/wsl` + `/dev/dxg`
 (the driver store 9p mount is required, `/usr/lib/wsl/lib` alone is not enough); the Vulkan
 `ERROR_INCOMPATIBLE_DRIVER` messages at startup are non-fatal for headless physics-only runs;
 `PYTHONUNBUFFERED=1` is required because kit can abort at shutdown before flushing stdout.
+
+## Iteration 2 (2026-07-18, after run 1)
+
+Run 1 (4096 envs) got stuck in a **crouch-walk local optimum** by ~iter 500: up_proj ~0.85
+(vertical trunk), zero falls, tracking reward saturated — but base height pinned at the
+quadruped ~0.30 m for 300+ iterations. The robot walked on deeply bent hind legs and had
+no incentive to extend: tracking paid in full while crouched.
+
+Changes:
+1. **Tracking is now height-gated too**: `track_gate = upright_gate * clamp((h-0.35)/0.10, 0, 1)`
+   applied to lin/yaw tracking and the gait contact reward. Crouch-walking no longer pays.
+2. `height_ramp_reward_scale` 1.5 -> 3.0.
+3. `height_fine` kernel widened (width 0.01 -> 0.02, cfg `height_fine_width`) so its gradient
+   reaches further down the crouch.
+4. New **ungated** `hind_calf_contact_penalty` (-0.2 per calf in contact): sitting back on the
+   hind calves is never free, even below the uprightness gate.
+
+## Iteration 3 (2026-07-18, after run 2)
+
+Run 2 fixed the crouch-walk hack, and height began climbing (~iter 700-1100, pitched-up crouch
+slowly extending). But at ~iter 1300 the policy found reward hack #2: **tip-toe quadruped** —
+h_ramp was gated only by height, so standing tall on all four extended legs (up_proj ~0,
+base ~0.39 m) collected ~1.2/step of height reward with no balance risk, and the policy
+abandoned the rear-up entirely (upright per-step fell 1.79 -> 1.0; fell_forward face-plants
+appeared).
+
+Change: `height_ramp` now has its own **soft pitch gate** `clamp((up_proj-0.5)/0.4, 0, 1)`
+(cfg `height_ramp_gate_lower/upper` = 0.5/0.9) — opens from ~30 deg pitch, full at ~64 deg.
+Tall-quadruped earns nothing; the pitched-up crouch (up_proj ~0.8+) keeps ~75-100% of the
+height gradient. The main uprightness gate (0.80/0.95) was NOT used here on purpose: the
+crouch hovers at up_proj ~0.78-0.85 and would get near-zero height gradient under it.

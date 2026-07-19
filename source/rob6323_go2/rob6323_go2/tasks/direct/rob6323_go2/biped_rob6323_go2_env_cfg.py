@@ -106,6 +106,18 @@ class BipedRob6323Go2EnvCfg(DirectRLEnvCfg):
     # Gate is 0 below gate_lower (~53 deg pitch) and 1 above gate_upper (~72 deg).
     gate_lower = 0.80
     gate_upper = 0.95
+    # Height gate on tracking rewards: crouch-walking (vertical trunk, base at quadruped
+    # height) must not pay, or it becomes a local optimum. Tracking ramps in over this range.
+    track_height_lower = 0.35
+    track_height_upper = 0.45
+    # Softer pitch gate on the height ramp: without it, standing tall on all fours
+    # (tip-toe quadruped) collects the height reward with zero pitch. Opens from ~30 deg
+    # pitch so the pitched-up crouch keeps a strong height gradient.
+    height_ramp_gate_lower = 0.5
+    height_ramp_gate_upper = 0.9
+    # Width of the exp kernel rewarding base height at the biped target (wider -> gradient
+    # reaches further down the crouch)
+    height_fine_width = 0.02
 
     # Front-leg tuck pose targets (fold forearms against the belly in the nose-up frame)
     front_tuck_hip = 0.0
@@ -127,9 +139,11 @@ class BipedRob6323Go2EnvCfg(DirectRLEnvCfg):
     # reward scales
     # -- ungated shaping (drives rear-up from frame 1)
     upright_reward_scale = 2.0
-    height_ramp_reward_scale = 1.5
+    height_ramp_reward_scale = 3.0
     roll_penalty_scale = -2.0
     joint_limit_penalty_scale = -10.0
+    # Ungated: sitting back on the hind calves must never be free
+    hind_calf_contact_penalty_scale = -0.2
     # -- gated (pay only once upright)
     height_fine_reward_scale = 1.0
     lin_vel_reward_scale = 1.5

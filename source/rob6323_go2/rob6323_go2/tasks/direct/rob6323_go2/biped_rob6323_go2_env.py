@@ -63,6 +63,7 @@ class BipedRob6323Go2Env(DirectRLEnv):
                 "front_contact_penalty",
                 "tracking_contacts_shaped_force",
                 "undesired_contact_penalty",
+                "hind_calf_contact_penalty",
                 "vertical_velocity_penalty",
                 "torque_magnitude_penalty",
                 "action_rate_penalty",
@@ -116,6 +117,8 @@ class BipedRob6323Go2Env(DirectRLEnv):
         for pattern in ["R[LR]_thigh", "R[LR]_calf", "base"]:
             id_list, _ = self._contact_sensor.find_bodies(pattern)
             self._undesired_contact_body_ids_sensor.extend(id_list)
+        # Hind calves separately for the ungated sitting penalty
+        self._hind_calf_ids_sensor, _ = self._contact_sensor.find_bodies("R[LR]_calf")
 
         # Hind-leg gait clock state (2 feet: RL, RR)
         self.gait_indices = torch.zeros(self.num_envs, dtype=torch.float, device=self.device, requires_grad=False)
@@ -242,25 +245,38 @@ class BipedRob6323Go2Env(DirectRLEnv):
 
         # -- ungated shaping (drives the rear-up from frame 1)
         rew_upright = 0.5 * (1.0 + up_proj)
-        # Linear ramp toward the biped stance height (exp kernel would be flat at start height)
-        rew_height_ramp = (
+        # Linear ramp toward the biped stance height (exp kernel would be flat at start height),
+        # gated by a soft pitch gate so a tip-toe quadruped stance earns nothing from height.
+        height_pitch_gate = (
+            (up_proj - self.cfg.height_ramp_gate_lower)
+            / (self.cfg.height_ramp_gate_upper - self.cfg.height_ramp_gate_lower)
+        ).clamp(0.0, 1.0)
+        rew_height_ramp = height_pitch_gate * (
             (base_height - self.cfg.quad_start_height)
             / (self.cfg.biped_height_target - self.cfg.quad_start_height)
         ).clamp(0.0, 1.0)
         pen_roll = torch.square(self.robot.data.projected_gravity_b[:, 1])
         pen_joint_limits = self._penalty_joint_limits()
+        pen_hind_calf = self._penalty_hind_calf_contact()
 
         # -- gated terms (pay only once upright)
         rew_height_fine = gate * torch.exp(
-            -torch.square(base_height - self.cfg.biped_height_target) / 0.01
+            -torch.square(base_height - self.cfg.biped_height_target) / self.cfg.height_fine_width
         )
+        # Tracking additionally requires standing tall: crouch-walking with a vertical
+        # trunk must not collect tracking reward (observed local optimum).
+        height_gate = (
+            (base_height - self.cfg.track_height_lower)
+            / (self.cfg.track_height_upper - self.cfg.track_height_lower)
+        ).clamp(0.0, 1.0)
+        track_gate = gate * height_gate
         lin_err = torch.square(self._commands[:, 0] - v_fwd) + torch.square(v_lat)
-        rew_track_lin = gate * torch.exp(-lin_err / 0.25)
+        rew_track_lin = track_gate * torch.exp(-lin_err / 0.25)
         yaw_err = torch.square(self._commands[:, 2] - self.robot.data.root_ang_vel_w[:, 2])
-        rew_track_yaw = gate * torch.exp(-yaw_err / 0.25)
+        rew_track_yaw = track_gate * torch.exp(-yaw_err / 0.25)
         pen_front_tuck = gate * self._penalty_front_tuck()
         pen_front_contact = gate * self._penalty_front_contact()
-        rew_tracking_contacts = gate * self._reward_tracking_contacts_shaped_force()
+        rew_tracking_contacts = track_gate * self._reward_tracking_contacts_shaped_force()
         pen_undesired_contact = gate * self._penalty_undesired_contact()
         vertical_excess = torch.clamp(torch.abs(self.robot.data.root_lin_vel_w[:, 2]) - 0.3, min=0.0)
         pen_vertical_vel = gate * torch.square(vertical_excess)
@@ -287,6 +303,7 @@ class BipedRob6323Go2Env(DirectRLEnv):
             "front_contact_penalty": pen_front_contact * self.cfg.front_contact_penalty_scale,
             "tracking_contacts_shaped_force": rew_tracking_contacts * self.cfg.tracking_contacts_shaped_force_reward_scale,
             "undesired_contact_penalty": pen_undesired_contact * self.cfg.undesired_contact_penalty_scale,
+            "hind_calf_contact_penalty": pen_hind_calf * self.cfg.hind_calf_contact_penalty_scale,
             "vertical_velocity_penalty": pen_vertical_vel * self.cfg.vertical_velocity_penalty_scale,
             "torque_magnitude_penalty": penalty_torque_magnitude * self.cfg.torque_magnitude_penalty_scale,
             "action_rate_penalty": penalty_action_rate * self.cfg.action_rate_penalty_scale,
@@ -328,6 +345,12 @@ class BipedRob6323Go2Env(DirectRLEnv):
         tracking_error = torch.abs(normalized_force - desired_contacts)
         per_foot_reward = 1.0 - torch.clamp(tracking_error, 0.0, 1.0)
         return torch.mean(per_foot_reward, dim=1)
+
+    def _penalty_hind_calf_contact(self) -> torch.Tensor:
+        """Ungated penalty for hind-calf ground contact — sitting back is never free."""
+        calf_forces = self._contact_sensor.data.net_forces_w_history[:, 0, self._hind_calf_ids_sensor, :]
+        force_magnitude = torch.norm(calf_forces, dim=-1)
+        return (force_magnitude > self.cfg.contact_force_threshold).float().sum(dim=1)
 
     def _penalty_undesired_contact(self) -> torch.Tensor:
         """Penalize contact on hind thighs/calves and the base (gated: legal during rear-up)."""
