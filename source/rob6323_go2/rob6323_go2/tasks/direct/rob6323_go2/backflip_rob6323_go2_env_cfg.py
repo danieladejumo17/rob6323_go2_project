@@ -3,9 +3,10 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
+import math
+
 from isaaclab_assets.robots.unitree import UNITREE_GO2_CFG
 
-import isaaclab.envs.mdp as mdp
 import isaaclab.sim as sim_utils
 from isaaclab.assets import ArticulationCfg
 from isaaclab.envs import DirectRLEnvCfg
@@ -14,20 +15,31 @@ from isaaclab.sim import SimulationCfg
 from isaaclab.utils import configclass
 from isaaclab.terrains import TerrainImporterCfg
 from isaaclab.sensors import ContactSensorCfg
-from isaaclab.markers import VisualizationMarkersCfg
-from isaaclab.markers.config import BLUE_ARROW_X_MARKER_CFG, FRAME_MARKER_CFG, GREEN_ARROW_X_MARKER_CFG
+
 
 @configclass
-class Rob6323Go2EnvCfg(DirectRLEnvCfg):
+class BackflipRob6323Go2EnvCfg(DirectRLEnvCfg):
+    """Single backflip with recovery to quadruped standing for the Unitree Go2.
+
+    The robot spawns in its default quadruped stance and follows a timed phase
+    schedule observed by the policy: stand (P0), crouch/launch/rotate backward
+    (P1, flip window), then land and hold quadruped standing until timeout (P2).
+    Standing rewards in P2 are gated by flip completion so skipping the flip
+    never pays.
+    """
+
     # env
     decimation = 4
-    episode_length_s = 20.0
+    episode_length_s = 5.0
     # - spaces definition
-    action_scale = 0.25
+    action_scale = 0.5  # deep crouch/tuck needs ~1 rad offsets; quadruped 0.25 is too tight
     action_space = 12
-    observation_space = 52  # 48 (original) + 4 (backflip context: is_backflip, stage_norm, stage_time_norm, turn_progress_norm)
+    observation_space = 47  # 45 proprio + episode-time + rotation-progress scalars
     state_space = 0
-    debug_vis = True
+
+    # Phase schedule (seconds from episode start)
+    flip_start_time = 0.5  # end of prepare/stand phase, start of flip window
+    flip_end_time = 2.0    # end of flip window, start of recovery/stand phase
 
     # simulation
     sim: SimulationCfg = SimulationCfg(
@@ -54,117 +66,68 @@ class Rob6323Go2EnvCfg(DirectRLEnvCfg):
         ),
         debug_vis=False,
     )
+    # PD control gains (stiffer than locomotion's 20/0.5 for the explosive extension)
+    Kp = 30.0
+    Kd = 0.7
+    torque_limits = 23.5  # Match DCMotor effort limit so penalties/logging see real torques
+
     # robot(s)
     robot_cfg: ArticulationCfg = UNITREE_GO2_CFG.replace(prim_path="/World/envs/env_.*/Robot")
+    # Disable implicit PD controller by setting stiffness and damping to 0 for all actuators
+    for actuator_name, actuator in robot_cfg.actuators.items():
+        if hasattr(actuator, "stiffness"):
+            actuator.stiffness = 0.0
+        if hasattr(actuator, "damping"):
+            actuator.damping = 0.0
 
     # scene
     scene: InteractiveSceneCfg = InteractiveSceneCfg(num_envs=4096, env_spacing=4.0, replicate_physics=True)
     contact_sensor: ContactSensorCfg = ContactSensorCfg(
         prim_path="/World/envs/env_.*/Robot/.*", history_length=3, update_period=0.005, track_air_time=True
     )
-    goal_vel_visualizer_cfg: VisualizationMarkersCfg = GREEN_ARROW_X_MARKER_CFG.replace(
-        prim_path="/Visuals/Command/velocity_goal"
-    )
-    """The configuration for the goal velocity visualization marker. Defaults to GREEN_ARROW_X_MARKER_CFG."""
 
-    current_vel_visualizer_cfg: VisualizationMarkersCfg = BLUE_ARROW_X_MARKER_CFG.replace(
-        prim_path="/Visuals/Command/velocity_current"
-    )
-    """The configuration for the current velocity visualization marker. Defaults to BLUE_ARROW_X_MARKER_CFG."""
+    # Flip parameters
+    flip_target_rotation = 2.0 * math.pi  # full backward turn; cum_pitch target is -2*pi
+    # Completion gate: 0 below 70% of a full turn, 1 at 95% (smooth ramp)
+    flip_done_gate_lower = 0.7
+    flip_done_gate_width = 0.25
+    # At least this much backward pitch (rad) must happen fully airborne for the flip
+    # to count — a ground tumble over the legs rotates fully but never ballistic
+    aerial_rotation_threshold = math.pi
+    flip_height_start = 0.30     # base height (m) where the jump-height reward starts paying
+                                 # (= standing height; safe with the fully-airborne gate)
+    flip_height_clip = 0.5       # cap on rewarded height gain (m)
 
-    # Set the scale of the visualization markers to (0.5, 0.5, 0.5)
-    goal_vel_visualizer_cfg.markers["arrow"].scale = (0.5, 0.5, 0.5)
-    current_vel_visualizer_cfg.markers["arrow"].scale = (0.5, 0.5, 0.5)
+    # Standing parameters
+    stand_height_target = 0.30  # quadruped stance base height (m)
+    stand_height_width = 0.01   # exp kernel width (m^2) for the height reward
+    stand_pose_width = 1.0      # exp kernel width (rad^2) for the default-pose reward
+
+    # Contact detection
+    contact_force_threshold = 5.0  # Newtons (feet contact / airborne detection)
+    base_contact_force_threshold = 1.0  # Newtons (crash termination, as in the quadruped task)
 
     # reward scales
-    lin_vel_reward_scale = 1.0
-    yaw_rate_reward_scale = 0.5
-
-    # ============ Backflip Configuration (Stage-Wise Reward Shaping) ============
-    # Based on "Stage-Wise Reward Shaping for Acrobatic Robots" (arXiv:2409.15755)
-    enable_backflip: bool = True
-    backflip_prob: float = 0.5  # Probability of sampling a backflip episode per reset
-
-    # Stage durations (minimum durations; transitions also event-based)
-    stage_durations_s: dict = {
-        "stand": 1.0,
-        "sit": 0.5,
-        "jump": 0.3,
-        "air": 2.0,
-        "land": 1.0,
-    }
-
-    # Height targets and thresholds
-    stand_height_target: float = 0.35  # Paper uses pz≈0.35 in stand/land
-    sit_height_target: float = 0.20  # Paper uses pz≈0.20 in sit
-    sit_to_jump_height_thresh: float = 0.25  # Paper Fig.3: sit→jump when base height < 0.25
-    jump_height_cap: float = 0.5  # Paper height reward gated by 1_{pz<=0.5}
-
-    # Action scaling during jump/air stages
-    backflip_action_scale_mult: float = 2.0  # Applied during jump/air only
-
-    # Termination thresholds for backflip
-    backflip_min_height_crash: float = 0.05  # Crash if height < this while in Air
-    backflip_max_ang_vel: float = 50.0  # Safety clamp for angular velocity (rad/s)
-    backflip_base_contact_force_thresh: float = 10.0  # Base contact force threshold (N)
-
-    # Reward scales per stage (stage-wise reward shaping from Table I)
-    # Format: {stage_name: {reward_component: scale}}
-    # Stages: "stand", "sit", "jump", "air", "land"
-    reward_scales: dict = {
-        "stand": {
-            "height": 5.0,
-            "velocity": 0.5,
-            "balance": 2.0,
-            "style": 0.1,
-            "energy": 0.05,
-        },
-        "sit": {
-            "height": 5.0,
-            "velocity": 0.5,
-            "balance": 2.0,
-            "style": 0.1,
-            "energy": 0.05,
-        },
-        "jump": {
-            "height": 15.0,  # Increased to encourage jump height
-            "velocity": 5.0,  # Increased to encourage more angular velocity for backflip rotation
-            "balance": 3.0,
-            "style": 0.05,  # Reduced to allow more deviation during jump
-            "energy": 0.05,
-            "turn_progress": 10.0,  # New: reward for completing rotation
-        },
-        "air": {
-            "height": 10.0,
-            "velocity": 5.0,  # Increased to encourage continued rotation
-            "balance": 3.0,
-            "style": 0.05,  # Reduced to allow tuck during flip
-            "energy": 0.05,
-            "turn_progress": 10.0,  # New: reward for completing rotation
-        },
-        "land": {
-            "height": 5.0,
-            "velocity": 0.5,
-            "balance": 2.0,
-            "style": 0.1,
-            "energy": 0.05,
-        },
-    }
-
-    # Cost penalty scales (applied as negative rewards)
-    cost_scales: dict = {
-        "body_contact": 10.0,
-        "joint_position": 1.0,
-        "joint_velocity": 0.1,
-        "joint_torque": 0.01,
-        "foot_contact": 5.0,  # Only active in jump stage
-    }
-
-    # Success termination criteria (in land stage)
-    land_success_upright_thresh: float = 0.2  # Max angle from upright (rad)
-    land_success_ang_vel_thresh: float = 1.0  # Max angular velocity (rad/s)
-    land_success_stable_steps: int = 50  # Steps to maintain stability before success
-
-    # Joint limits for cost computation
-    joint_velocity_limit: float = 30.0  # rad/s
-    joint_torque_limit: float = 40.0  # Nm (approximate for Go2)
+    # -- flip window
+    # Progress-based: pays only for NEW net backward rotation (running max), so the
+    # total per episode is bounded by the scale — rate oscillation cannot farm it.
+    flip_rotation_reward_scale = 20.0
+    flip_height_reward_scale = 3.0
+    # Per-radian shaping for backward rotation while fully airborne (capped at 2*pi)
+    aerial_rotation_reward_scale = 5.0
+    flip_completion_reward_scale = 1.0
+    # -- standing (P0 ungated, P2 gated by flip completion)
+    stand_upright_reward_scale = 1.0
+    stand_height_reward_scale = 1.0
+    stand_pose_reward_scale = 0.5
+    stand_feet_contact_reward_scale = 0.5
+    stand_still_penalty_scale = -0.1
+    # -- always-on contact/regularization penalties
+    # Kneeling/sitting on calves or thighs must never be free: it fakes both "standing"
+    # and "airborne feet" (observed exploit in the first training run)
+    undesired_contact_penalty_scale = -1.0
+    joint_limit_penalty_scale = -10.0
+    torque_magnitude_penalty_scale = -1e-4
+    action_rate_penalty_scale = -1e-3
+    action_jerk_penalty_scale = -5e-4
+    dof_vel_penalty_scale = -5e-5

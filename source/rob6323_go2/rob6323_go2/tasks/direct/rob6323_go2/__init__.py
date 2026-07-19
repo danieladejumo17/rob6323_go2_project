@@ -31,3 +31,13 @@ gym.register(
         "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:BipedPPORunnerCfg",
     },
 )
+
+gym.register(
+    id="Template-Rob6323-Go2-Backflip-Direct-v0",
+    entry_point=f"{__name__}.backflip_rob6323_go2_env:BackflipRob6323Go2Env",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.backflip_rob6323_go2_env_cfg:BackflipRob6323Go2EnvCfg",
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.rsl_rl_ppo_cfg:BackflipPPORunnerCfg",
+    },
+)

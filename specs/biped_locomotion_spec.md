@@ -174,3 +174,24 @@ Change: `height_ramp` now has its own **soft pitch gate** `clamp((up_proj-0.5)/0
 Tall-quadruped earns nothing; the pitched-up crouch (up_proj ~0.8+) keeps ~75-100% of the
 height gradient. The main uprightness gate (0.80/0.95) was NOT used here on purpose: the
 crouch hovers at up_proj ~0.78-0.85 and would get near-zero height gradient under it.
+
+## Final results (run 3, 2026-07-19)
+
+Run 3 (pitch-gated height ramp) succeeded: breakthrough to full standing by iter ~250,
+converged by ~iter 2000, final mean reward 8253 with full-length episodes and zero falls.
+
+Quantitative eval of `model_2999.pt` (64 envs, 1500 steps, metrics after 400-step settle,
+`scripts/rsl_rl/eval_biped.py`):
+- mean uprightness (up_proj): **0.991**
+- mean base height: **0.529 m** (target 0.52)
+- standing fraction (up_proj>0.9 & h>0.45): **98.4%**
+- mean |v_fwd error|: **0.065 m/s**
+- mean |yaw rate error|: 0.359 rad/s  <- weakest metric, see below
+- front-foot contact: 0.0%, falls: 0
+
+Checkpoint: `logs/rsl_rl_local/rsl_rl/go2_biped_direct/2026-07-18_23-22-57/model_2999.pt`
+
+Known remaining weakness: yaw-rate tracking is poor (error ~0.36 rad/s on +-0.5 range).
+Candidate improvements for a follow-up run: raise `yaw_rate_reward_scale` (0.75 -> 1.5),
+and/or verify world-frame yaw is the right tracked quantity for a robot that can only
+yaw by stepping around with its hind feet.
